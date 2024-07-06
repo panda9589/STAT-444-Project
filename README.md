@@ -1,0 +1,2 @@
+Advanced Regression Analysis for the following data:
+https://www.researchgate.net/publication/376615651_Electricity_Energy_Dataset_BanE-16_Analysis_of_Peak_Energy_Demand_with_Environmental_Variables_for_Machine_Learning_Forecasting
