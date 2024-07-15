@@ -410,3 +410,28 @@ mse_plot <- ggplot(sorted_data_for_plot, aes(x = Model, y = MSE, fill = Model)) 
   theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Improve label readability
 mse_plot
 
+
+# Saving the linear regression residual analysis plots
+pdf("Linear_Regression_Residual_Analysis.pdf")
+grid_plots
+dev.off()
+
+# Saving the weighted linear regression residual analysis plots
+pdf("Weighted_Linear_Regression_Residual_Analysis.pdf")
+grid_plots
+dev.off()
+
+# Saving the KNN cross-validation performance plot
+pdf("KNN_CV_Performance.pdf")
+ggplot(results, aes(x = k, y = RMSE, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Cross-Validation Performance Across Different k Values",
+       x = "Number of Neighbors (k)", y = "Root Mean Squared Error (RMSE)")
+dev.off()
+
+# Saving the comparison of MSE across models
+pdf("Model_MSE_Comparison.pdf")
+mse_plot
+dev.off()
+
