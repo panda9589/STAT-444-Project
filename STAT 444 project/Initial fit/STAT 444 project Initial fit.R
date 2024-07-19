@@ -58,7 +58,6 @@ linreg_loo <- function(y, X) {
   mean(((y - yhat) / (1 - hii))^2)
 }
 
-# Linear Regression --------------------------------------------------------------------------------------------------------------------------
 # put a copy of the dataset inside your "Documents" folder
 # Load the data
 data <- read_csv("STAT 444 project data RAW.csv")
@@ -67,11 +66,15 @@ colnames(data) <- c("date_1", "day", "month", "year", "temp2_c", "temp2_max_c",
                     "wind_speed50_max_m_s", "wind_speed50_min_m_s", 
                     "wind_speed50_ave_m_s", "prectotcorr", "total_demand_mw", 
                     "date_2", "max_generation_mw")
-# Remove rows with missing 'total_demand(mw)'
 clean_data <- na.omit(data, cols = "total_demand_mw")
+clean_data <- as.data.frame(clean_data)
+data_scaled <- clean_data
+data_scaled <- data_scaled %>% select(-date_1, -date_2)
+for (i in 1:(ncol(data_scaled))) data_scaled[ ,i] <- (data_scaled[ ,i] - mean(data_scaled[ ,i])) / sd(data_scaled[ ,i])
+# Remove rows with missing 'total_demand(mw)'
+clean_data <- as.data.frame(data_scaled)
 
-# norm_data <- clean_data - 
-
+# Linear Regression --------------------------------------------------------------------------------------------------------------------------
 # Fit the linear regression model using all other variables
 # model <- lm(`total_demand(mw)` ~ . - date_1 - date_2, data = clean_data)
 # model <- lm(total_demand.mw. ~ . 
@@ -80,7 +83,6 @@ clean_data <- na.omit(data, cols = "total_demand_mw")
 #             - `wind_speed50_ave.m.s.`
 #             - `max_generation.mw.`, data = clean_data)
 model <- lm(total_demand_mw ~ . 
-            - date_1 - date_2
             - temp2_c - temp2_min_c
             - wind_speed50_ave_m_s
             - max_generation_mw, data = clean_data)
@@ -120,11 +122,12 @@ plot4 <- ggplot(clean_data, aes_string(x = hatvalues(model), y = resid(model))) 
        y = "Residuals") +
   geom_smooth(method = "loess", se = FALSE, color = "red")
 
-# Arrange the plots in a 2x2 grid
 library(gridExtra)
-grid_plots <- grid.arrange(plot1, plot2, plot3, plot4, ncol = 2, nrow = 2,
+pdf("Linear_Regression_Residual_Analysis.pdf")
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2, nrow = 2,
                            top = textGrob("Linear Regression Residual Analysis", 
                                           gp = gpar(fontsize = 15, fontface = "bold")))
+dev.off()
 
 # Calculate residuals
 residuals <- residuals(model)
@@ -138,7 +141,7 @@ print(residuals)
 
 # Prepare the data for cross-validation
 # Ensure only relevant predictors are included as per the model specification
-X <- model.matrix(total_demand_mw ~ . - date_1 - date_2 - temp2_c - temp2_min_c - wind_speed50_ave_m_s - max_generation_mw, data = clean_data)
+X <- model.matrix(total_demand_mw ~ . - temp2_c - temp2_min_c - wind_speed50_ave_m_s - max_generation_mw, data = clean_data)
 y <- clean_data$total_demand_mw
 
 # Specify the number of folds for k-fold cross-validation
@@ -168,26 +171,13 @@ for (i in seq_along(k_values)) {
 print(cv_errors)
 
 
-
+# Saving the linear regression residual analysis plots
 
 
 # WLS ---------------------------------------------------------------------
 
-
-# Load the data
-data <- read_csv("STAT 444 project data RAW.csv")
-colnames(data) <- c("date_1", "day", "month", "year", "temp2_c", "temp2_max_c",
-                    "temp2_min_c", "temp2_ave_c", "surface_pressure_pa", 
-                    "wind_speed50_max_m_s", "wind_speed50_min_m_s", 
-                    "wind_speed50_ave_m_s", "prectotcorr", "total_demand_mw", 
-                    "date_2", "max_generation_mw")
-
-# Remove rows with missing 'total_demand_mw'
-clean_data <- na.omit(data, cols = "total_demand_mw")
-
 # Fit the initial linear regression model to get residuals
 initial_model <- lm(total_demand_mw ~ . 
-                    - date_1 - date_2
                     - temp2_c - temp2_min_c
                     - wind_speed50_ave_m_s
                     - max_generation_mw, data = clean_data)
@@ -197,7 +187,6 @@ wt <- 1 / lm(abs(initial_model$residuals) ~ initial_model$fitted.values)$fitted.
 
 # Fit the WLS model using the calculated weights
 wls_model <- lm(total_demand_mw ~ . 
-                - date_1 - date_2
                 - temp2_c - temp2_min_c
                 - wind_speed50_ave_m_s
                 - max_generation_mw, data = clean_data,
@@ -241,12 +230,13 @@ plot4 <- ggplot(clean_data, aes(x = hatvalues(wls_model), y = resid(wls_model)))
 
 # Arrange the plots in a 2x2 grid
 library(gridExtra)
-grid_plots <- grid.arrange(plot1, plot2, plot3, plot4, ncol = 2, nrow = 2,
+pdf("Weighted_Linear_Regression_Residual_Analysis.pdf")
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2, nrow = 2,
                            top = textGrob("Weighted Linear Regression Residual Analysis", 
                                           gp = gpar(fontsize = 15, fontface = "bold")))
 
-# Print the arranged plots
-grid_plots
+# Saving the weighted linear regression residual analysis plots
+dev.off()
 # Calculate residuals for the WLS model
 wls_residuals <- residuals(wls_model)
 
@@ -256,7 +246,6 @@ print(wls_mse)
 
 # Fit the initial linear regression model to get residuals
 initial_model <- lm(total_demand_mw ~ . 
-                    - date_1 - date_2
                     - temp2_c - temp2_min_c
                     - wind_speed50_ave_m_s
                     - max_generation_mw, data = clean_data)
@@ -271,7 +260,7 @@ clean_data$weights <- wt
 train_control <- trainControl(method = "cv", number = 5)
 
 # Define the formula for the model
-formula <- total_demand_mw ~ . - date_1 - date_2- temp2_c - temp2_min_c- wind_speed50_ave_m_s- max_generation_mw
+formula <- total_demand_mw ~ . - temp2_c - temp2_min_c- wind_speed50_ave_m_s- max_generation_mw
 
 # Train the WLS model using caret
 wls_model_caret <- train(formula, data = clean_data, method = "lm", 
@@ -283,20 +272,10 @@ print(paste("Mean Squared Error: ", wls_model_caret$results$RMSE^2))
 
 # KNN ------------------------------------------------------------------------
 library(FNN)
-# Load the data
-data <- read_csv("STAT 444 project data RAW.csv")
-colnames(data) <- c("date_1", "day", "month", "year", "temp2_c", "temp2_max_c",
-                    "temp2_min_c", "temp2_ave_c", "surface_pressure_pa", 
-                    "wind_speed50_max_m_s", "wind_speed50_min_m_s", 
-                    "wind_speed50_ave_m_s", "prectotcorr", "total_demand_mw", 
-                    "date_2", "max_generation_mw")
-
-# Remove rows with missing 'total_demand_mw'
-clean_data <- na.omit(data, cols = "total_demand_mw")
 
 # Prepare data for KNN regression
 knn_data <- clean_data %>% 
-  select(-date_1, -date_2, -temp2_c, -temp2_min_c, -wind_speed50_ave_m_s, -max_generation_mw)
+  select(-temp2_c, -temp2_min_c, -wind_speed50_ave_m_s, -max_generation_mw)
 
 x <- as.matrix(knn_data %>% select(-total_demand_mw))
 y <- knn_data$total_demand_mw
@@ -347,18 +326,16 @@ ggplot(results, aes(x = k, y = RMSE, group = 1)) +
   geom_point() +
   labs(title = "Cross-Validation Performance Across Different k Values",
        x = "Number of Neighbors (k)", y = "Root Mean Squared Error (RMSE)")
+# Saving the KNN cross-validation performance plot
+pdf("KNN_CV_Performance.pdf")
+ggplot(results, aes(x = k, y = RMSE, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Cross-Validation Performance Across Different k Values",
+       x = "Number of Neighbors (k)", y = "Root Mean Squared Error (RMSE)")
+dev.off()
 
 # GAM -----------------------------------------------------------------------------------------------------------------------
-
-data <- read_csv("STAT 444 project data RAW.csv")
-colnames(data) <- c("date_1", "day", "month", "year", "temp2_c", "temp2_max_c",
-                    "temp2_min_c", "temp2_ave_c", "surface_pressure_pa", 
-                    "wind_speed50_max_m_s", "wind_speed50_min_m_s", 
-                    "wind_speed50_ave_m_s", "prectotcorr", "total_demand_mw", 
-                    "date_2", "max_generation_mw")
-
-# Remove rows with missing 'total_demand_mw'
-clean_data <- na.omit(data, cols = "total_demand_mw")
 knots <- 20
 gam_model <- mgcv::gam(total_demand_mw ~ s(temp2_max_c, bs = "bs", k = knots) + 
                          s(surface_pressure_pa, bs = "bs", k = knots) + 
@@ -417,27 +394,24 @@ mse_plot <- ggplot(sorted_data_for_plot, aes(x = Model, y = MSE, fill = Model)) 
 mse_plot
 
 
-# Saving the linear regression residual analysis plots
-pdf("Linear_Regression_Residual_Analysis.pdf")
-grid_plots
-dev.off()
 
-# Saving the weighted linear regression residual analysis plots
-pdf("Weighted_Linear_Regression_Residual_Analysis.pdf")
-grid_plots
-dev.off()
-
-# Saving the KNN cross-validation performance plot
-pdf("KNN_CV_Performance.pdf")
-ggplot(results, aes(x = k, y = RMSE, group = 1)) +
-  geom_line() +
-  geom_point() +
-  labs(title = "Cross-Validation Performance Across Different k Values",
-       x = "Number of Neighbors (k)", y = "Root Mean Squared Error (RMSE)")
-dev.off()
 
 # Saving the comparison of MSE across models
 pdf("Model_MSE_Comparison.pdf")
 mse_plot
 dev.off()
 
+## Ridge, with glmnet ##
+
+X <- model.matrix(linmod)
+glmnetridgecv <- cv.glmnet(X, y, alpha = 0)
+plot(glmnetridgecv)
+minlambda <- glmnetridgecv$lambda.min
+glmnetridge_nocv <- glmnet(X, y, alpha = 0)
+plot(glmnetridge_nocv, xvar = "lambda")
+# Which variables do you think are those top curves?
+round(t(glmnetridge_nocv$beta), 4)
+
+glmnetridge_withcv <- glmnet(X, y, alpha = 0, lambda = minlambda)
+glmnetridge_withcv$beta # Coefficient estimates
+cbind(glmnetridge_withcv$beta, coef(linmod))
