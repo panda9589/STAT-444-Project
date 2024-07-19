@@ -364,13 +364,52 @@ qqline(resid(gam_model), col = "red")
 
 # Adding a common title across the top of all plots
 mtext("GAM Residual vs Fitted + QQ Plot", side = 3, line = -2, outer = TRUE, cex = 1.3)
+# Ridge regression -----------------------------------------------------------------------------------------
+par(mfrow=c(1, 1))
+X <- model.matrix(model)
+glmnetridgecv <- cv.glmnet(X, clean_data$total_demand_mw, alpha = 0, nfolds = 5)
+plot(glmnetridgecv)
+minlambda <- glmnetridgecv$lambda.min
+glmnetridge_nocv <- glmnet(X, clean_data$total_demand_mw, alpha = 0, nfolds = 5)
+plot(glmnetridge_nocv, xvar = "lambda")
+# Which variables do you think are those top curves?
+round(t(glmnetridge_nocv$beta), 4)
+
+glmnetridge_withcv <- glmnet(X, clean_data$total_demand_mw, alpha = 0, lambda = minlambda)
+glmnetridge_withcv$beta # Coefficient estimates
+cbind(glmnetridge_withcv$beta, coef(model))
+
+ridge_model <- train(X, y,
+                     method = "glmnet",
+                     trControl = train_control,
+                     tuneGrid = expand.grid(.alpha = 0, .lambda = minlambda))
+ridge_model$results$RMSE^2
+# LASSO ---------------------------------------------------------------------------
+
+glmnetlassocv <- cv.glmnet(X, y, alpha = 1)
+plot(glmnetlassocv)
+minlambda <- glmnetlassocv$lambda.min
+lambda1se <- glmnetlassocv$lambda.1se
+glmnetlasso_nocv <- glmnet(X, y, alpha = 1)
+plot(glmnetlasso_nocv, xvar = "lambda")
+cbind(
+  coef(glmnetlasso_nocv, s = minlambda),
+  coef(glmnetlasso_nocv, s = lambda1se)
+)
+lasso_model <- train(X, y,
+                     method = "glmnet",
+                     trControl = train_control,
+                     tuneGrid = expand.grid(.alpha = 1, .lambda = minlambda))
+lasso_model$results$RMSE^2
 # CV results comparison (so far):-----------------------------------------------------------------------------------------------------------------------------------
 CV_results <- list(linear = cv_errors[1], # Linear model CV for K=5
                    wls = wls_model_caret$results$RMSE^2,
                    knn5 = knn_fit5$results$RMSE^2,
                    knn21 = knn_fit21$results$RMSE^2,
                    knn51 = knn_fit51$results$RMSE^2,
-                   gam = cv_gam$results$RMSE^2)
+                   gam = cv_gam$results$RMSE^2, 
+                   ridge = ridge_model$results$RMSE^2,
+                   lasso = lasso_model$results$RMSE^2)
 
 # Convert the list to a data frame
 models <- names(CV_results)
@@ -401,17 +440,3 @@ pdf("Model_MSE_Comparison.pdf")
 mse_plot
 dev.off()
 
-## Ridge, with glmnet ##
-
-X <- model.matrix(linmod)
-glmnetridgecv <- cv.glmnet(X, y, alpha = 0)
-plot(glmnetridgecv)
-minlambda <- glmnetridgecv$lambda.min
-glmnetridge_nocv <- glmnet(X, y, alpha = 0)
-plot(glmnetridge_nocv, xvar = "lambda")
-# Which variables do you think are those top curves?
-round(t(glmnetridge_nocv$beta), 4)
-
-glmnetridge_withcv <- glmnet(X, y, alpha = 0, lambda = minlambda)
-glmnetridge_withcv$beta # Coefficient estimates
-cbind(glmnetridge_withcv$beta, coef(linmod))
