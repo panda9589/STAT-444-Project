@@ -1,13 +1,19 @@
-# Load necessary library
-library(readr)
-library(dplyr)
-library(Matrix)
-library(mgcv) 
-library(splines)
-library(gamair)
-library(caret)
-library(ggplot2)
+# List of required packages
+packages <- c("grid", "gridExtra", "readr", "dplyr", "Matrix", "mgcv", 
+              "splines", "gamair", "caret", "ggplot2", "gam")
 
+# Function to check and install packages
+install_if_missing <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+  }
+}
+
+# Check and install each package
+invisible(lapply(packages, install_if_missing))
+
+# Load the libraries
+lapply(packages, library, character.only = TRUE)
 
 
 linreg_kfold <- function(y,X,K) {
