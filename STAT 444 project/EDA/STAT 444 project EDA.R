@@ -4,7 +4,6 @@ library(dplyr)
 library(corrplot)
 
 # Load the dataset
-setwd('C:\\Users\\tyb_l\\Documents\\STAT 444 project\\EDA')
 
 data <- read.csv("STAT 444 project data RAW.csv")
 
@@ -73,6 +72,11 @@ pdf("time_series_temp2_ave.pdf")
 ggplot(data, aes(x = date_1, y = temp2_ave.c.)) + 
   geom_line(color = "blue") + 
   labs(title = "Time Series of Average Temperature", x = "Date", y = "Average Temperature (C)")
+dev.off()
+pdf("time_series_total_demand.pdf")
+ggplot(data, aes(x = date_1, y = total_demand.mw.)) + 
+  geom_line(color = "blue") + 
+  labs(title = "Time Series of Total demand", x = "Date", y = "Total demand")
 dev.off()
 
 pdf("time_series_wind_speed50_ave.pdf")

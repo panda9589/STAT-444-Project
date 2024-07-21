@@ -1,6 +1,7 @@
 # List of required packages
 packages <- c("grid", "gridExtra", "readr", "dplyr", "Matrix", "mgcv", 
-              "splines", "gamair", "caret", "ggplot2", "gam")
+              "splines", "gamair", "caret", "ggplot2", "gam", "vars", 
+              "forecast", "vars", "rBayesianOptimization", "e1071")
 
 # Function to check and install packages
 install_if_missing <- function(pkg) {
@@ -68,11 +69,18 @@ colnames(data) <- c("date_1", "day", "month", "year", "temp2_c", "temp2_max_c",
                     "date_2", "max_generation_mw")
 clean_data <- na.omit(data, cols = "total_demand_mw")
 clean_data <- as.data.frame(clean_data)
+data <- clean_data
 data_scaled <- clean_data
-data_scaled <- data_scaled %>% select(-date_1, -date_2)
+data_scaled <- data_scaled %>% dplyr::select(-date_1, -date_2)
 for (i in 1:(ncol(data_scaled))) data_scaled[ ,i] <- (data_scaled[ ,i] - mean(data_scaled[ ,i])) / sd(data_scaled[ ,i])
 # Remove rows with missing 'total_demand(mw)'
 clean_data <- as.data.frame(data_scaled)
+clean_data <- clean_data %>% 
+  dplyr::select(-temp2_c, -temp2_min_c, -wind_speed50_ave_m_s, -max_generation_mw)
+
+# remove year and day too
+#clean_data <- clean_data %>% 
+#  dplyr::select(- year, -temp2_c, -temp2_min_c, -wind_speed50_ave_m_s, -max_generation_mw)
 
 # Linear Regression --------------------------------------------------------------------------------------------------------------------------
 # Fit the linear regression model using all other variables
@@ -82,10 +90,7 @@ clean_data <- as.data.frame(data_scaled)
 #             - temp2.c. - `temp2_min.c.`
 #             - `wind_speed50_ave.m.s.`
 #             - `max_generation.mw.`, data = clean_data)
-model <- lm(total_demand_mw ~ . 
-            - temp2_c - temp2_min_c
-            - wind_speed50_ave_m_s
-            - max_generation_mw, data = clean_data)
+model <- lm(total_demand_mw ~ . , data = clean_data)
 
 # Summary of the model
 summary(model)
@@ -141,7 +146,7 @@ print(residuals)
 
 # Prepare the data for cross-validation
 # Ensure only relevant predictors are included as per the model specification
-X <- model.matrix(total_demand_mw ~ . - temp2_c - temp2_min_c - wind_speed50_ave_m_s - max_generation_mw, data = clean_data)
+X <- model.matrix(total_demand_mw ~ ., data = clean_data)
 y <- clean_data$total_demand_mw
 
 # Specify the number of folds for k-fold cross-validation
@@ -177,19 +182,13 @@ print(cv_errors)
 # WLS ---------------------------------------------------------------------
 
 # Fit the initial linear regression model to get residuals
-initial_model <- lm(total_demand_mw ~ . 
-                    - temp2_c - temp2_min_c
-                    - wind_speed50_ave_m_s
-                    - max_generation_mw, data = clean_data)
+initial_model <- lm(total_demand_mw ~ ., data = clean_data)
 
 # Define weights based on the residuals of the initial model
 wt <- 1 / lm(abs(initial_model$residuals) ~ initial_model$fitted.values)$fitted.values^2
 
 # Fit the WLS model using the calculated weights
-wls_model <- lm(total_demand_mw ~ . 
-                - temp2_c - temp2_min_c
-                - wind_speed50_ave_m_s
-                - max_generation_mw, data = clean_data,
+wls_model <- lm(total_demand_mw ~ ., data = clean_data,
                 weights = wt)
 
 # Summary of the WLS model
@@ -245,39 +244,35 @@ wls_mse <- mean(wls_residuals^2)
 print(wls_mse)
 
 # Fit the initial linear regression model to get residuals
-initial_model <- lm(total_demand_mw ~ . 
-                    - temp2_c - temp2_min_c
-                    - wind_speed50_ave_m_s
-                    - max_generation_mw, data = clean_data)
+initial_model <- lm(total_demand_mw ~ ., data = clean_data)
 
 # Define weights based on the residuals of the initial model
 wt <- 1 / lm(abs(initial_model$residuals) ~ initial_model$fitted.values)$fitted.values^2
 
 # Create a new dataframe with weights
-clean_data$weights <- wt
+clean_data_wt <- clean_data
+clean_data_wt$weights <- wt
 
 # Define the trainControl object for k-fold cross-validation
 train_control <- trainControl(method = "cv", number = 5)
 
 # Define the formula for the model
-formula <- total_demand_mw ~ . - temp2_c - temp2_min_c- wind_speed50_ave_m_s- max_generation_mw
+formula <- total_demand_mw ~ .
 
 # Train the WLS model using caret
-wls_model_caret <- train(formula, data = clean_data, method = "lm", 
-                         weights = clean_data$weights, trControl = train_control)
-
+wls_model_caret <- train(formula, data = clean_data_wt, method = "lm", 
+                         weights = clean_data_wt$weights, trControl = train_control)
+varImp(wls_model_caret)
 # Print the results of cross-validation
 print(wls_model_caret)
 print(paste("Mean Squared Error: ", wls_model_caret$results$RMSE^2))
-
 # KNN ------------------------------------------------------------------------
 library(FNN)
 
 # Prepare data for KNN regression
-knn_data <- clean_data %>% 
-  select(-temp2_c, -temp2_min_c, -wind_speed50_ave_m_s, -max_generation_mw)
+knn_data <- clean_data 
 
-x <- as.matrix(knn_data %>% select(-total_demand_mw))
+x <- as.matrix(knn_data %>% dplyr::select(-total_demand_mw))
 y <- knn_data$total_demand_mw
 
 # Define the trainControl object for k-fold cross-validation
@@ -337,12 +332,19 @@ dev.off()
 
 # GAM -----------------------------------------------------------------------------------------------------------------------
 knots <- 20
-gam_model <- mgcv::gam(total_demand_mw ~ s(temp2_max_c, bs = "bs", k = knots) + 
-                         s(surface_pressure_pa, bs = "bs", k = knots) + 
-                         s(wind_speed50_max_m_s, bs = "bs", k = knots) + 
-                         s(wind_speed50_min_m_s, bs = "bs", k = knots) + 
-                         s(prectotcorr, bs = "bs", k = knots),
-                       data = clean_data)
+
+# Define the response variable
+response_variable <- "total_demand_mw"
+
+# Get all column names from the data except the response variable
+covariates <- setdiff(names(clean_data), response_variable)
+
+# Create the formula dynamically
+smooth_terms <- paste0("s(", covariates, ", bs = 'bs', k = knots)", collapse = " + ")
+formula <- as.formula(paste(response_variable, "~", smooth_terms))
+
+# Fit the model using the dynamically created formula
+gam_model <- mgcv::gam(formula, data = clean_data)
 summary(gam_model)
 
 cv_control <- trainControl(method = "cv", number = 5)
@@ -379,28 +381,192 @@ glmnetridge_withcv <- glmnet(X, clean_data$total_demand_mw, alpha = 0, lambda = 
 glmnetridge_withcv$beta # Coefficient estimates
 cbind(glmnetridge_withcv$beta, coef(model))
 
-ridge_model <- train(X, y,
+ridge_model <- train(X, clean_data$total_demand_mw,
                      method = "glmnet",
                      trControl = train_control,
                      tuneGrid = expand.grid(.alpha = 0, .lambda = minlambda))
 ridge_model$results$RMSE^2
 # LASSO ---------------------------------------------------------------------------
 
-glmnetlassocv <- cv.glmnet(X, y, alpha = 1)
+glmnetlassocv <- cv.glmnet(X, clean_data$total_demand_mw, alpha = 1)
 plot(glmnetlassocv)
 minlambda <- glmnetlassocv$lambda.min
 lambda1se <- glmnetlassocv$lambda.1se
-glmnetlasso_nocv <- glmnet(X, y, alpha = 1)
+glmnetlasso_nocv <- glmnet(X, clean_data$total_demand_mw, alpha = 1)
 plot(glmnetlasso_nocv, xvar = "lambda")
 cbind(
   coef(glmnetlasso_nocv, s = minlambda),
   coef(glmnetlasso_nocv, s = lambda1se)
 )
-lasso_model <- train(X, y,
+lasso_model <- train(X, clean_data$total_demand_mw,
                      method = "glmnet",
                      trControl = train_control,
                      tuneGrid = expand.grid(.alpha = 1, .lambda = minlambda))
 lasso_model$results$RMSE^2
+# Elastic net ------------------------------------------------------------------------------------------------------------------------------------------------
+# Define the function to optimize
+elastic_net_cv <- function(alpha, lambda) {
+  tryCatch({
+    # Set up cross-validation control
+    train_control <- trainControl(method = "cv", number = 5)
+    
+    # Train the model
+    model <- train(
+      X, y,
+      method = "glmnet",
+      trControl = train_control,
+      tuneGrid = expand.grid(.alpha = alpha, .lambda = lambda)
+    )
+    
+    # Return the negative RMSE as Bayesian Optimization maximizes the objective function
+    list(Score = -min(model$results$RMSE), Pred = model$results$RMSE)
+  }, error = function(e) {
+    # Return a large negative score in case of an error to discourage this parameter set
+    list(Score = -1e10, Pred = NA)
+  })
+}
+
+# Define the bounds of the search space
+bounds <- list(alpha = c(0, 1), lambda = c(0.001, 0.1))
+
+# Run Bayesian Optimization
+if (!exists(opt)){
+  opt <- BayesianOptimization(
+    FUN = elastic_net_cv,
+    bounds = bounds,
+    init_points = 10,
+    n_iter = 50,
+    acq = "ucb",
+    kappa = 2.576,
+    eps = 0.0,
+    verbose = TRUE
+  )
+}
+
+# Extract the best parameters
+best_alpha <- opt$Best_Par["alpha"]
+best_lambda <- opt$Best_Par["lambda"]
+
+# Fit the final elastic net model using the best parameters
+final_elastic_net_model <- glmnet(X, y, alpha = best_alpha, lambda = best_lambda)
+
+# Coefficients of the final model
+coefficients <- coef(final_elastic_net_model, s = best_lambda)
+print(coefficients)
+
+
+# Plotting the cross-validation results for elastic net
+cv_results <- data.frame(lambda = elastic_net_model$results$lambda, RMSE = elastic_net_model$results$RMSE)
+elastic_best_mse <- -opt$Best_Value
+print(elastic_best_mse)
+
+# PPR --------------------------------------------------------------------------------------------------------------------------------------------------------
+
+ppr_model <- ppr(total_demand_mw~ ., data = clean_data,   nterms = 2, 
+                 optlevel = 3, 
+                 max.terms = 2,
+                 sm.method = "gcvspline")
+
+formula <- as.formula("total_demand_mw~ .")
+
+# Function to perform cross-validation
+cv_ppr <- function(data, formula, nterms, optlevel, max.terms, sm.method, k = 10) {
+  n <- nrow(data)
+  folds <- sample(rep(1:k, length.out = n))
+  errors <- numeric(k)
+  
+  for (i in 1:k) {
+    train_data <- data[folds != i, ]
+    test_data <- data[folds == i, ]
+    
+    model <- ppr(formula, data = train_data, nterms = nterms, optlevel = optlevel, max.terms = max.terms, sm.method = sm.method)
+    predictions <- predict(model, newdata = test_data)
+    actuals <- test_data$total_demand_mw
+    
+    error <- mean((predictions - actuals)^2) # Mean Squared Error
+    errors[i] <- error
+  }
+  
+  return(mean(errors))
+}
+
+# Perform cross-validation
+ppr_mse <- cv_ppr(clean_data, formula, nterms = 2, optlevel = 3, max.terms = 2, sm.method = "gcvspline", k = 10)
+print(paste("Cross-Validation Error (MSE):", ppr_mse))
+# multivariate time series ----------------------------------------------------------------------------------------------------------------------------------------
+# Convert data to a time series object, here you should specify the frequency
+# For example, if your data is daily, frequency would be 365, etc.
+ts_data_orig <- clean_data
+if("day" %in% colnames(ts_data_orig)) {
+  # Remove the 'day' column from 'clean_data'
+  ts_data_orig <- ts_data_orig[, !colnames(ts_data_orig) %in% "day"]
+}
+if("month" %in% colnames(ts_data_orig)) {
+  # Remove the 'day' column from 'clean_data'
+  ts_data_orig <- ts_data_orig[, !colnames(ts_data_orig) %in% "month"]
+}
+if("year" %in% colnames(ts_data_orig)) {
+  # Remove the 'day' column from 'clean_data'
+  ts_data_orig <- ts_data_orig[, !colnames(ts_data_orig) %in% "year"]
+}
+
+ts_data_orig$date_1 <- data$date_1
+
+ts_data <- ts(ts_data_orig, frequency = 365, start=c(2018,1))
+
+# Fit a VAR model, where 'p' is the order of the model
+# You might need to determine the optimal 'p' using AIC or BIC, here I assume p=1 for simplicity
+var_model <- VAR(ts_data, p = 1, type = "both")
+
+# Calculate the initial length of the training set (50% of data)
+initial_train_length <- floor(0.5 * nrow(ts_data))
+test_length <- nrow(ts_data) - initial_train_length
+
+# Function to convert index to (year, day of year)
+index_to_year_day <- function(index) {
+  year <- 2018 + (index - 1) %/% 365
+  day <- (index - 1) %% 365 + 1
+  return(c(year, day))
+}
+
+# Array to store forecast errors
+errors <- numeric(test_length)
+
+# Loop over each point in the test set, expanding the training set each time
+for (i in 1:test_length) {
+  # Expanding training set
+  train_end_index <- initial_train_length + i - 1
+  train_end <- index_to_year_day(train_end_index)
+  train_set <- window(ts_data, end = train_end)
+  
+  # Next point to forecast
+  test_index <- initial_train_length + i
+  test_start_end <- index_to_year_day(test_index)
+  test_set <- window(ts_data, start = test_start_end, end = test_start_end)
+  
+  # Fit VAR model to the training set
+  var_model <- VAR(train_set, p = 1, type = "both")
+  
+  # Forecast the next point
+  forecast_result <- predict(var_model, n.ahead = 1)
+  
+  # Assuming 'total_demand_mw' is the target variable; adjust index as needed based on your dataset
+  forecasted_value <- forecast_result$fcst$total_demand_mw[1, "fcst"]
+  actual_value <- test_set[1, "total_demand_mw"]
+  
+  # Calculate error for the forecast, here using Mean Squared Error (MSE)
+  errors[i] <- (forecasted_value - actual_value)^2
+}
+
+# Calculate Mean Squared Error (MSE)
+time_series_mse <- mean(errors)
+print(paste("Mean Squared Error: ", time_series_mse))
+# neural networks --------------------------------------------------------------------------------------------------------------------------------------------------
+# check regression_NN.ipynb for MSE:
+neural_network_mse = 0.98896531
+# xgBoost ----------------------------------------------------------------------------------------------------------------------------------------------------------
+# check regression_xbg.ipynb for MSE:
+xgBoost_mse = 0.1603
 # CV results comparison (so far):-----------------------------------------------------------------------------------------------------------------------------------
 CV_results <- list(linear = cv_errors[1], # Linear model CV for K=5
                    wls = wls_model_caret$results$RMSE^2,
@@ -409,7 +575,12 @@ CV_results <- list(linear = cv_errors[1], # Linear model CV for K=5
                    knn51 = knn_fit51$results$RMSE^2,
                    gam = cv_gam$results$RMSE^2, 
                    ridge = ridge_model$results$RMSE^2,
-                   lasso = lasso_model$results$RMSE^2)
+                   lasso = lasso_model$results$RMSE^2,
+                   ppr = ppr_mse,
+                   # time_series = time_series_mse,
+                   neural_network = neural_network_mse,
+                   elastic_xgBoost = xgBoost_mse,
+                   elastic = elastic_best_mse)
 
 # Convert the list to a data frame
 models <- names(CV_results)
@@ -436,7 +607,9 @@ mse_plot
 
 
 # Saving the comparison of MSE across models
-pdf("Model_MSE_Comparison.pdf")
+pdf("Model_MSE_Comparison3.pdf")
 mse_plot
 dev.off()
+
+  
 

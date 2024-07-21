@@ -1,0 +1,41 @@
+---
+title: "Stat444 project in projection persuit"
+output: html_document
+date: "2024-07-20"
+---
+
+
+```{r}
+ppr_model <- ppr(total_demand_mw~ .- temp2_c-temp2_min_c-wind_speed50_ave_m_s- max_generation_mw, data = clean_data,   nterms = 2, 
+  optlevel = 3, 
+  max.terms = 2,
+  sm.method = "gcvspline")
+
+formula <- as.formula("total_demand_mw~ .- temp2_c-temp2_min_c-wind_speed50_ave_m_s- max_generation_mw")
+
+# Function to perform cross-validation
+cv_ppr <- function(data, formula, nterms, optlevel, max.terms, sm.method, k = 10) {
+  n <- nrow(data)
+  folds <- sample(rep(1:k, length.out = n))
+  errors <- numeric(k)
+  
+  for (i in 1:k) {
+    train_data <- data[folds != i, ]
+    test_data <- data[folds == i, ]
+    
+    model <- ppr(formula, data = train_data, nterms = nterms, optlevel = optlevel, max.terms = max.terms, sm.method = sm.method)
+    predictions <- predict(model, newdata = test_data)
+    actuals <- test_data$total_demand_mw
+    
+    error <- mean((predictions - actuals)^2) # Mean Squared Error
+    errors[i] <- error
+  }
+  
+  return(mean(errors))
+}
+
+# Perform cross-validation
+cv_error <- cv_ppr(clean_data, formula, nterms = 2, optlevel = 3, max.terms = 2, sm.method = "gcvspline", k = 10)
+print(paste("Cross-Validation Error (MSE):", cv_error))
+```
+
