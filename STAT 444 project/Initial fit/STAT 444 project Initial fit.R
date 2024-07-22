@@ -77,7 +77,13 @@ for (i in 1:(ncol(data_scaled))) data_scaled[ ,i] <- (data_scaled[ ,i] - mean(da
 clean_data <- as.data.frame(data_scaled)
 clean_data <- clean_data %>% 
   dplyr::select(-temp2_c, -temp2_min_c, -wind_speed50_ave_m_s, -max_generation_mw)
+# Calculate the index for the split
+split_index <- floor(0.9 * nrow(clean_data))
 
+# Split the data into training and testing 
+orig_train_data <- clean_data[1:split_index, ]
+orig_test_data <- clean_data[(split_index + 1):nrow(clean_data), ]
+clean_data = orig_train_data
 # remove year and day too
 #clean_data <- clean_data %>% 
 #  dplyr::select(- year, -temp2_c, -temp2_min_c, -wind_speed50_ave_m_s, -max_generation_mw)
@@ -279,7 +285,6 @@ y <- knn_data$total_demand_mw
 train_control <- trainControl(method = "cv", number = 5)
 
 # Create a data frame for the caret package
-train_data <- data.frame(x, y)
 
 # Perform k=5 k-fold cross-validation for KNN with different k values
 set.seed(123) # for reproducibility
@@ -405,6 +410,7 @@ lasso_model <- train(X, clean_data$total_demand_mw,
 lasso_model$results$RMSE^2
 # Elastic net ------------------------------------------------------------------------------------------------------------------------------------------------
 # Define the function to optimize
+# Define the elastic net cross-validation function
 elastic_net_cv <- function(alpha, lambda) {
   tryCatch({
     # Set up cross-validation control
@@ -430,7 +436,8 @@ elastic_net_cv <- function(alpha, lambda) {
 bounds <- list(alpha = c(0, 1), lambda = c(0.001, 0.1))
 
 # Run Bayesian Optimization
-if (!exists(opt)){
+load("opt_object.RData")
+if (!exists("opt")){
   opt <- BayesianOptimization(
     FUN = elastic_net_cv,
     bounds = bounds,
@@ -455,9 +462,25 @@ coefficients <- coef(final_elastic_net_model, s = best_lambda)
 print(coefficients)
 
 
-# Plotting the cross-validation results for elastic net
-cv_results <- data.frame(lambda = elastic_net_model$results$lambda, RMSE = elastic_net_model$results$RMSE)
-elastic_best_mse <- -opt$Best_Value
+
+y <- clean_data$total_demand_mw
+
+# Set up cross-validation control
+train_control <- trainControl(method = "cv", number = 5)
+
+# Train the model using cross-validation
+model <- train(
+  X, y,
+  method = "glmnet",
+  trControl = train_control,
+  tuneGrid = expand.grid(.alpha = best_alpha, .lambda = best_lambda)
+)
+
+# Get cross-validation results
+cv_results <- model$results
+
+# Calculate Mean Squared Error (MSE) from RMSE
+elastic_best_mse <- min(cv_results$RMSE)^2
 print(elastic_best_mse)
 
 # PPR --------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -494,72 +517,52 @@ cv_ppr <- function(data, formula, nterms, optlevel, max.terms, sm.method, k = 10
 ppr_mse <- cv_ppr(clean_data, formula, nterms = 2, optlevel = 3, max.terms = 2, sm.method = "gcvspline", k = 10)
 print(paste("Cross-Validation Error (MSE):", ppr_mse))
 # multivariate time series ----------------------------------------------------------------------------------------------------------------------------------------
-# Convert data to a time series object, here you should specify the frequency
-# For example, if your data is daily, frequency would be 365, etc.
-ts_data_orig <- clean_data
-if("day" %in% colnames(ts_data_orig)) {
-  # Remove the 'day' column from 'clean_data'
-  ts_data_orig <- ts_data_orig[, !colnames(ts_data_orig) %in% "day"]
+timeseries_train_data <- orig_train_data
+timeseries_test_data <- orig_test_data
+
+if("day" %in% colnames(timeseries_train_data)) {
+  timeseries_train_data <- timeseries_train_data[, !colnames(timeseries_train_data) %in% "day"]
 }
-if("month" %in% colnames(ts_data_orig)) {
-  # Remove the 'day' column from 'clean_data'
-  ts_data_orig <- ts_data_orig[, !colnames(ts_data_orig) %in% "month"]
+if("month" %in% colnames(timeseries_train_data)) {
+  timeseries_train_data <- timeseries_train_data[, !colnames(timeseries_train_data) %in% "month"]
 }
-if("year" %in% colnames(ts_data_orig)) {
-  # Remove the 'day' column from 'clean_data'
-  ts_data_orig <- ts_data_orig[, !colnames(ts_data_orig) %in% "year"]
+if("year" %in% colnames(timeseries_train_data)) {
+  timeseries_train_data <- timeseries_train_data[, !colnames(timeseries_train_data) %in% "year"]
 }
 
-ts_data_orig$date_1 <- data$date_1
-
-ts_data <- ts(ts_data_orig, frequency = 365, start=c(2018,1))
-
-# Fit a VAR model, where 'p' is the order of the model
-# You might need to determine the optimal 'p' using AIC or BIC, here I assume p=1 for simplicity
-var_model <- VAR(ts_data, p = 1, type = "both")
-
-# Calculate the initial length of the training set (50% of data)
-initial_train_length <- floor(0.5 * nrow(ts_data))
-test_length <- nrow(ts_data) - initial_train_length
-
-# Function to convert index to (year, day of year)
-index_to_year_day <- function(index) {
-  year <- 2018 + (index - 1) %/% 365
-  day <- (index - 1) %% 365 + 1
-  return(c(year, day))
+if("day" %in% colnames(timeseries_test_data)) {
+  timeseries_test_data <- timeseries_test_data[, !colnames(timeseries_test_data) %in% "day"]
+}
+if("month" %in% colnames(timeseries_test_data)) {
+  timeseries_test_data <- timeseries_test_data[, !colnames(timeseries_test_data) %in% "month"]
+}
+if("year" %in% colnames(timeseries_test_data)) {
+  timeseries_test_data <- timeseries_test_data[, !colnames(timeseries_test_data) %in% "year"]
 }
 
-# Array to store forecast errors
-errors <- numeric(test_length)
+# Combine train and test data for creating time series object
+combined_data <- rbind(timeseries_train_data, timeseries_test_data)
 
-# Loop over each point in the test set, expanding the training set each time
-for (i in 1:test_length) {
-  # Expanding training set
-  train_end_index <- initial_train_length + i - 1
-  train_end <- index_to_year_day(train_end_index)
-  train_set <- window(ts_data, end = train_end)
-  
-  # Next point to forecast
-  test_index <- initial_train_length + i
-  test_start_end <- index_to_year_day(test_index)
-  test_set <- window(ts_data, start = test_start_end, end = test_start_end)
-  
-  # Fit VAR model to the training set
-  var_model <- VAR(train_set, p = 1, type = "both")
-  
-  # Forecast the next point
-  forecast_result <- predict(var_model, n.ahead = 1)
-  
-  # Assuming 'total_demand_mw' is the target variable; adjust index as needed based on your dataset
-  forecasted_value <- forecast_result$fcst$total_demand_mw[1, "fcst"]
-  actual_value <- test_set[1, "total_demand_mw"]
-  
-  # Calculate error for the forecast, here using Mean Squared Error (MSE)
-  errors[i] <- (forecasted_value - actual_value)^2
-}
+# Convert combined data to a time series object with daily frequency
+ts_data <- ts(combined_data, frequency = 365, start = c(2018, 1))
+
+# Split time series object back into train and test sets
+train_ts <- window(ts_data, end = c(2018 + floor(0.9 * nrow(ts_data) / 365) - 1, (0.9 * nrow(ts_data)) %% 365))
+test_ts <- window(ts_data, start = c(2018 + floor(0.9 * nrow(ts_data) / 365), (0.9 * nrow(ts_data)) %% 365 + 1))
+
+# Fit a VAR model to the training set
+var_model <- VAR(train_ts, p = 1, type = "both")
+
+# Forecast the test set
+forecast_result <- predict(var_model, n.ahead = nrow(test_ts))
+
+# Assuming 'total_demand_mw' is the target variable; adjust index as needed based on your dataset
+forecasted_values <- forecast_result[["fcst"]][["total_demand_mw"]][, 1]
 
 # Calculate Mean Squared Error (MSE)
-time_series_mse <- mean(errors)
+actual_values <- test_ts[, "total_demand_mw"]
+
+time_series_mse <- mean((forecasted_values - actual_values)^2)
 print(paste("Mean Squared Error: ", time_series_mse))
 # neural networks --------------------------------------------------------------------------------------------------------------------------------------------------
 # check regression_NN.ipynb for MSE:

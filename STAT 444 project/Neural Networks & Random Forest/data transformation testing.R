@@ -1,6 +1,6 @@
 # List of required packages
 packages <- c("grid", "gridExtra", "readr", "dplyr", "Matrix", "mgcv", 
-              "splines", "gamair", "caret", "ggplot2", "gam", "moments")
+              "splines", "gamair", "caret", "ggplot2", "gam", "moments", "imputeTS")
 
 # Function to check, install if missing, and load packages
 install_and_load <- function(pkg) {
@@ -22,7 +22,7 @@ colnames(data) <- c("date_1", "day", "month", "year", "temp2_c", "temp2_max_c",
                     "date_2", "max_generation_mw")
 # for (i in 1:(ncol(data_scaled))) data_scaled[ ,i] <- (data_scaled[ ,i] - mean(data_scaled[ ,i])) / sd(data_scaled[ ,i])
 clean_data <- data
-for (i in 1:(ncol(clean_data))) clean_data <- na.omit(clean_data, cols = colnames(clean_data)[i])
+clean_data <- na_interpolation(clean_data, option = "spline")
 powerfun <- function(y, alpha) {
   y = y + 1e-8
   if (alpha == 0){
