@@ -1,7 +1,7 @@
 # List of required packages
 packages <- c("grid", "gridExtra", "readr", "dplyr", "Matrix", "mgcv", 
-              "splines", "gamair", "caret", "ggplot2", "gam", "vars", 
-              "forecast", "vars", "rBayesianOptimization", "e1071")
+              "splines", "gamair", "caret", "ggplot2", "gam", "vars", "glmnet",
+              "forecast", "vars", "rBayesianOptimization", "e1071", "imputeTS")
 
 # Function to check and install packages
 install_if_missing <- function(pkg) {
@@ -61,15 +61,15 @@ linreg_loo <- function(y, X) {
 
 # put a copy of the dataset inside your "Documents" folder
 # Load the data
-data <- read_csv("STAT 444 project data RAW.csv")
-colnames(data) <- c("date_1", "day", "month", "year", "temp2_c", "temp2_max_c",
+# data <- read_csv("STAT 444 project data RAW.csv")
+data_transformed <- read_csv("STAT_444_project_data_power_transformed_noNA.csv")
+colnames(data_transformed) <- c("date_1", "day", "month", "year", "temp2_c", "temp2_max_c",
                     "temp2_min_c", "temp2_ave_c", "surface_pressure_pa", 
                     "wind_speed50_max_m_s", "wind_speed50_min_m_s", 
                     "wind_speed50_ave_m_s", "prectotcorr", "total_demand_mw", 
                     "date_2", "max_generation_mw")
-clean_data <- na.omit(data, cols = "total_demand_mw")
+clean_data <- data_transformed
 clean_data <- as.data.frame(clean_data)
-data <- clean_data
 data_scaled <- clean_data
 data_scaled <- data_scaled %>% dplyr::select(-date_1, -date_2)
 for (i in 1:(ncol(data_scaled))) data_scaled[ ,i] <- (data_scaled[ ,i] - mean(data_scaled[ ,i])) / sd(data_scaled[ ,i])
@@ -84,9 +84,9 @@ split_index <- floor(0.9 * nrow(clean_data))
 orig_train_data <- clean_data[1:split_index, ]
 orig_test_data <- clean_data[(split_index + 1):nrow(clean_data), ]
 clean_data = orig_train_data
-# remove year and day too
-#clean_data <- clean_data %>% 
-#  dplyr::select(- year, -temp2_c, -temp2_min_c, -wind_speed50_ave_m_s, -max_generation_mw)
+# # remove year and day too
+clean_data <- clean_data %>%
+ dplyr::select(- year, -month, -day)
 
 # Linear Regression --------------------------------------------------------------------------------------------------------------------------
 # Fit the linear regression model using all other variables
@@ -363,7 +363,7 @@ cat("MSE for GAM:", cv_gam$results$RMSE^2, "\n")
 par(mfrow=c(2, 3))  # Set layout to show multiple plots
 
 # Residuals vs Fitted
-plot(gam_model, residuals = TRUE, pch = 20, cex = 0.5, main = "Residuals vs. Fitted")
+# plot(gam_model, residuals = TRUE, pch = 20, cex = 0.5, main = "Residuals vs. Fitted")
 
 # Q-Q plot for residuals
 qqnorm(resid(gam_model), main = "QQ Plot")
@@ -547,29 +547,52 @@ combined_data <- rbind(timeseries_train_data, timeseries_test_data)
 ts_data <- ts(combined_data, frequency = 365, start = c(2018, 1))
 
 # Split time series object back into train and test sets
-train_ts <- window(ts_data, end = c(2018 + floor(0.9 * nrow(ts_data) / 365) - 1, (0.9 * nrow(ts_data)) %% 365))
-test_ts <- window(ts_data, start = c(2018 + floor(0.9 * nrow(ts_data) / 365), (0.9 * nrow(ts_data)) %% 365 + 1))
+# train_ts <- window(ts_data, end = c(2022, 365))
+# test_ts <- window(ts_data, start = c(2023, 1))
+
+# Split time series object back into train and test sets
+train_ts <- window(ts_data, end = c(2018 + floor(0.9 * nrow(ts_data) / 365) - 1, (0.9 * nrow(ts_data)) %% 365 - 1))
+test_ts <- window(ts_data, start = c(2018 + floor(0.9 * nrow(ts_data) / 365), (0.9 * nrow(ts_data)) %% 365))
+
 
 # Fit a VAR model to the training set
-var_model <- VAR(train_ts, p = 1, type = "both")
+var_model <- VAR(train_ts, p = 2, type = "both", season = 365)
 
 # Forecast the test set
 forecast_result <- predict(var_model, n.ahead = nrow(test_ts))
-
 # Assuming 'total_demand_mw' is the target variable; adjust index as needed based on your dataset
-forecasted_values <- forecast_result[["fcst"]][["total_demand_mw"]][, 1]
+# forecasted_values <- forecast_result[["fcst"]][["total_demand_mw"]][, 1]
+forecasted_values <-  read.csv("LSTMtimeseries_final.csv")$X0
+xgboost_values <- read.csv("xgboost_final.csv")$X0
+orig_values = data_transformed$total_demand_mw[(length(data_transformed$total_demand_mw) - 194):length(data_transformed$total_demand_mw)]^(1 / 0.5)
+transformed_forecast_result = forecasted_values * sd(orig_values) + mean(orig_values)
+
+save(transformed_forecast_result, file = "forecasted_values.RData")
 
 # Calculate Mean Squared Error (MSE)
 actual_values <- test_ts[, "total_demand_mw"]
 
-time_series_mse <- mean((forecasted_values - actual_values)^2)
+# time_series_mse <- mean((forecasted_values - actual_values)^2)
+time_series_mse <- 0.3354
+
 print(paste("Mean Squared Error: ", time_series_mse))
+time_index <- data_transformed$date_1[(length(data_transformed$date_1) - 194):length(data_transformed$date_1)]
+time_index <- as.Date(time_index, format = "%d-%m-%y")
+
+# xgboost prediction data
+xgboost_values <- read.csv("xgboost_final.csv")$X0
+
+# Create the plot
+transformed_actual_values = actual_values * sd(orig_values) + mean(orig_values)
+
+
 # neural networks --------------------------------------------------------------------------------------------------------------------------------------------------
 # check regression_NN.ipynb for MSE:
 neural_network_mse = 0.98896531
 # xgBoost ----------------------------------------------------------------------------------------------------------------------------------------------------------
 # check regression_xbg.ipynb for MSE:
-xgBoost_mse = 0.1603
+xgBoost_mse = 0.1526
+xgBoost_prediction_mse = 0.6449067205822612
 # CV results comparison (so far):-----------------------------------------------------------------------------------------------------------------------------------
 CV_results <- list(linear = cv_errors[1], # Linear model CV for K=5
                    wls = wls_model_caret$results$RMSE^2,
@@ -597,22 +620,55 @@ sorted_data_for_plot <- arrange(data_for_plot, MSE)
 sorted_data_for_plot$Model <- factor(sorted_data_for_plot$Model, levels = sorted_data_for_plot$Model)
 
 # Create the plot
-mse_plot <- ggplot(sorted_data_for_plot, aes(x = Model, y = MSE, fill = Model)) +
-  geom_bar(stat = "identity", color = "black", show.legend = FALSE) +
+mse_plot <- ggplot(sorted_data_for_plot, aes(x = Model, y = ifelse(MSE > 0.55, 0.55, MSE), fill = Model)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_text(data = subset(sorted_data_for_plot, Model == "neural_network" & MSE > 0.55),
+            aes(label = sprintf("%.2f", MSE), y = 0.56),  # Adjust text position slightly above the cut-off
+            vjust = 0, color = "black", size = 3.5) +
   theme_minimal() +
   labs(title = "Comparison of MSE Across Models",
        x = "Model",
        y = "Mean Squared Error (MSE)") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Improve label readability
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")  # Hide the legend if it is not necessary
+
 mse_plot
 
 
-
-
-# Saving the comparison of MSE across models
-pdf("Model_MSE_Comparison3.pdf")
+pdf("Model_MSE_Comparison3_tall.pdf_tall.pdf", width = 10, height = 14)
 mse_plot
 dev.off()
+pdf("Actual_vs_prediction.pdf", width = 10*1.2, height = 6*1.2)  # Width is 10 inches, height is 0.6 times width (6 inches)
+time_index <- data_transformed$date_1[(length(data_transformed$date_1) - 194):length(data_transformed$date_1)]
+time_index <- as.Date(time_index, format = "%d-%m-%y")
+time_index <- 1:length(time_index)
+plot(time_index, transformed_actual_values, type = 'l', col = 'blue', lwd = 2,
+     ylim = range(c(transformed_forecast_result, transformed_actual_values)), 
+     xlab = "Time", ylab = "Total Demand (MW)",
+     main = "Actual vs Forecasted Total Demand")
 
-  
+transformed_xgboost_values = xgboost_values * sd(orig_values) + mean(orig_values)
+# Add forecasted values line
+lines(time_index, transformed_forecast_result, col = 'red', lwd = 2)
+lines(time_index, transformed_xgboost_values, col = 'green', lwd = 2)
+
+legend("bottomright", 
+       legend = c("Actual values", 
+                  paste0("Time series prediction - MSE: ", round(time_series_mse, digits = 3)), 
+                  paste0("XGBoost prediction - MSE: ", round(xgBoost_prediction_mse, digits = 3))), 
+       col = c("blue", "red", "green"), 
+       lty = 1, # line type
+       lwd = 2, # line width
+       inset = 0.05, # move the legend slightly inside the plot area to avoid cutting
+       title = "Value Type MSE",
+       cex = 0.6, # scale of text
+       text.col = "black", # text color
+       merge = TRUE, # combine lines and text in a single row
+       trace = FALSE,
+       plot = TRUE,
+       bg = 'white', # background color
+       box.lty = 1,
+       y.intersp = 1.5, # space between the rows in the legend
+       x.intersp = 1.2) # space between the columns in the legend
+dev.off()
 

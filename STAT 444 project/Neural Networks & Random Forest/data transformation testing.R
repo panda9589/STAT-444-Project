@@ -96,5 +96,5 @@ apply_power_transformation <- function(data, alphas) {
 transformed_data <- apply_power_transformation(clean_data, best_alpha)
 
 # Saving the transformed data to a CSV file
-write_csv(transformed_data, "STAT_444_project_data_power_transformed.csv")
+write_csv(transformed_data, "STAT_444_project_data_power_transformed_noNA.csv")
 
